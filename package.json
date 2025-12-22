@@ -1,7 +1,7 @@
 {
-  "name": "markdown-checkbox",
-  "version": "0.4.0",
-  "displayName": "Markdown Checkboxes",
+  "name": "mjsk-markdown-checkboxes",
+  "version": "0.5.0",
+  "displayName": "Mjsk",
   "description": "Adds checkbox support to the built-in markdown preview",
   "keywords": [
     "markdown",
@@ -11,13 +11,13 @@
     "task list"
   ],
   "icon": "logo/logox128.png",
-  "publisher": "bierner",
+  "publisher": "xxmjskxx",
   "license": "MIT",
   "repository": {
-    "url": "https://github.com/mjbvz/vscode-markdown-checkboxes.git"
+    "url": "https://github.com/xxmjskxx/vscode-markdown-checkboxes.git"
   },
   "bugs": {
-    "url": "https://github.com/mjbvz/vscode-markdown-checkboxes/issues"
+    "url": "https://github.com/xxmjskxx/vscode-markdown-checkboxes/issues"
   },
   "engines": {
     "vscode": "^1.59.0"
@@ -25,19 +25,28 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:markdown",
+    "onCommand:mjsk-markdown-checkboxes.toggle"
+  ],
   "extensionKind": [
     "workspace"
   ],
   "contributes": {
+    "commands": [
+      {
+        "command": "mjsk-markdown-checkboxes.toggle",
+        "title": "Toggle Checkbox"
+      }
+    ],
     "markdown.markdownItPlugins": true,
     "markdown.previewStyles": [
       "checkboxes.css"
     ],
     "notebookRenderer": [
       {
-        "id": "bierner.markdown-it-markdown-checkbox",
-        "displayName": "Markdown it Checkbox renderer",
+        "id": "xxmjskxx.markdown-it-mjsk-markdown-checkboxes",
+        "displayName": "Mjsk Markdown Checkbox renderer",
         "entrypoint": {
           "extends": "vscode.markdown-it-renderer",
           "path": "./notebook-out/index.js"
@@ -45,21 +54,50 @@
       }
     ],
     "configuration": {
-      "title": "Markdown Checkboxes Options",
+      "title": "Mjsk Markdown Checkboxes Options",
       "properties": {
-        "markdown-checkboxes.enable": {
+        "mjsk-markdown-checkboxes.enable": {
           "type": "boolean",
           "description": "Enable checkboxes in markdown preview.",
           "default": true
         },
-        "markdown-checkboxes.label": {
+        "mjsk-markdown-checkboxes.enableTableCheckboxes": {
+          "type": "boolean",
+          "markdownDescription": "Enable parsing `[ ]`, `[x]`, `[~]`, and `[-]` checkboxes inside tables in the markdown preview. When disabled, checkbox parsing stays list-only (GitHub-style `- [ ]`).",
+          "default": false
+        },
+        "mjsk-markdown-checkboxes.enableExtendedStates": {
+          "type": "boolean",
+          "markdownDescription": "Enable rendering (and optional persistence toggling) for extended checkbox states `[~]` and `[-]`.",
+          "default": false
+        },
+        "mjsk-markdown-checkboxes.persistPreviewChanges": {
+          "type": "boolean",
+          "markdownDescription": "When enabled, clicking a checkbox in the markdown preview updates the source file. Requires VS Code setting `markdown.preview.allowCommandLinks` to be enabled to allow preview command links.",
+          "default": false
+        },
+        "mjsk-markdown-checkboxes.persistPreviewToggleCycle": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string",
+            "enum": [
+              "unchecked",
+              "checked",
+              "wip",
+              "cancelled"
+            ]
+          },
+          "markdownDescription": "Optional ordered list of checkbox states to cycle through when `#mjsk-markdown-checkboxes.persistPreviewChanges#` is enabled. If empty, uses the default toggle behavior. Example: `[\"unchecked\", \"wip\", \"checked\", \"cancelled\"]`."
+        },
+        "mjsk-markdown-checkboxes.label": {
           "type": "boolean",
           "markdownDescription": "Wrap the rendered list items in a `<label>` element.",
           "default": false
         },
-        "markdown-checkboxes.labelAfter": {
+        "mjsk-markdown-checkboxes.labelAfter": {
           "type": "boolean",
-          "markdownDescription": "Adds the label after the checkbox. Only applies when `#markdown-checkboxes.label#` is set to `true`.",
+          "markdownDescription": "Adds the label after the checkbox. Only applies when `#mjsk-markdown-checkboxes.label#` is set to `true`.",
           "default": false
         }
       }
@@ -68,10 +106,11 @@
   "main": "./dist/index.js",
   "browser": "./dist/web/index.js",
   "scripts": { 
+    "compile": "npm run package && npm run package-web && npm run build-notebook",
     "watch": "webpack --watch --config ./build/webpack.config.js",
     "package": "webpack --mode production --config ./build/webpack.config.js",
     "lint": "eslint -c .eslintrc.js --ext .ts src",
-    "vscode:prepublish": "npm run package ; npm run package-web ; npm run build-notebook",
+    "vscode:prepublish": "npm run package && npm run package-web && npm run build-notebook",
     "watch-web": "webpack --watch --config ./build/web-extension.webpack.config.js",
     "package-web": "webpack --mode production --devtool hidden-source-map --config ./build/web-extension.webpack.config.js",
     "build-notebook": "node ./esbuild-notebook"

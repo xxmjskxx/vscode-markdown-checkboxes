@@ -1,7 +1,8 @@
 import type MarkdownIt from 'markdown-it';
 import type { RendererContext } from 'vscode-notebook-renderer';
-import taskList from 'markdown-it-task-lists';
 import checkboxCss from '../checkboxes.css'
+
+import { checklistPlugin } from '../src/plugin';
   
 export async function activate(ctx: RendererContext<void>) {
 	const markdownItRenderer = (await ctx.getRenderer('vscode.markdown-it-renderer')) as undefined | any;
@@ -17,9 +18,14 @@ export async function activate(ctx: RendererContext<void>) {
 	document.head.appendChild(template);
 
 	markdownItRenderer.extendMarkdownIt((md: MarkdownIt) => {
-		return md.use(() => {
-			// TODO: Does not support options
-			return md.use(taskList);
-		});
+		md.use(checklistPlugin, () => ({
+			enabled: true,
+			label: false,
+			labelAfter: false,
+			enableTableCheckboxes: false,
+			enableExtendedStates: true,
+			persistPreviewChanges: false,
+		}));
+		return md;
 	});
 }
