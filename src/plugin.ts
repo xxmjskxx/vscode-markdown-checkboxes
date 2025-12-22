@@ -9,32 +9,7 @@ export interface CheckboxPluginOptions {
 	persistPreviewChanges: boolean;
 }
 
-function escapeAttribute(value: string): string {
-	return value
-		.replace(/&/g, '&amp;')
-		.replace(/"/g, '&quot;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;');
-}
-
-function isLikelyListItemPrefix(prefix: string): boolean {
-	// Matches: "- ", "* ", "+ ", "1. ", "1) " (with optional indent)
-	return /^\s*(?:[-+*]|\d+[.)])\s+$/.test(prefix);
-}
-
-function isLikelyTableRow(line: string): boolean {
-	// Heuristic: must contain at least two pipes and not be an hr/divider-only line.
-	// This intentionally keeps the check simple; VS Code enables table parsing by default.
-	const pipeCount = (line.match(/\|/g) ?? []).length;
-	if (pipeCount < 2) {
-		return false;
-	}
-	// Exclude common table separator rows: | --- | --- |
-	if (/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line)) {
-		return false;
-	}
-	return true;
-}
+const EXTENSION_ID = 'xxmjskxx.mjsk-markdown-checkboxes';
 
 function stateToClasses(state: string): { stateClass: string; ariaChecked: 'true' | 'false' | 'mixed' } {
 	const normalized = state.toLowerCase();
@@ -51,141 +26,208 @@ function stateToClasses(state: string): { stateClass: string; ariaChecked: 'true
 	}
 }
 
+
+function stateToGlyph(state: string): string {
+	const normalized = state.toLowerCase();
+	switch (normalized) {
+		case 'x':
+			return '☑';
+		case '~':
+			return '⊡';
+		case '-':
+			return '⊟';
+		case ' ':
+		default:
+			return '☐';
+	}
+}
+
+function normalizeStateChar(raw: string): ' ' | 'x' | '~' | '-' {
+	if (raw === 'X' || raw === 'x') {
+		return 'x';
+	}
+	if (raw === '~') {
+		return '~';
+	}
+	if (raw === '-') {
+		return '-';
+	}
+	return ' ';
+}
+
+function isStandardCheckbox(stateChar: string): boolean {
+	return stateChar === ' ' || stateChar.toLowerCase() === 'x';
+}
+
+function makeCheckboxHtml(stateChar: string, persist: boolean, args?: string): string {
+	const normalized = normalizeStateChar(stateChar);
+	if (isStandardCheckbox(normalized)) {
+		const checkedAttr = normalized === 'x' ? ' checked=""' : '';
+		const input = `<input class="task-list-item-checkbox" disabled="" type="checkbox"${checkedAttr}>`;
+		if (persist && args) {
+			return `<a class="task-list-item-checkbox-link" href="vscode://${EXTENSION_ID}/toggle?args=${args}" title="Toggle checkbox">${input}</a>`;
+		}
+		return input;
+	}
+
+	const glyph = stateToGlyph(normalized);
+	const { stateClass, ariaChecked } = stateToClasses(normalized);
+	const span = `<span class="task-list-item-checkbox ${stateClass}" role="checkbox" aria-checked="${ariaChecked}">${glyph}</span>`;
+	if (persist && args) {
+		return `<a class="task-list-item-checkbox-link" href="vscode://${EXTENSION_ID}/toggle?args=${args}" title="Toggle checkbox">${span}</a>`;
+	}
+	return span;
+}
+
+function replaceCheckboxesInText(text: string, makeNode: (stateChar: string) => Array<any>): Array<any> {
+	// Matches [ ], [x], [X], [~], [-] that are followed by space or end-of-string.
+	const regex = /\[([ xX~-])\](?=\s|$)/g;
+	const nodes: Array<any> = [];
+	let lastIndex = 0;
+	let match: RegExpExecArray | null;
+	while ((match = regex.exec(text))) {
+		if (match.index > lastIndex) {
+			nodes.push({ type: 'text', content: text.slice(lastIndex, match.index) });
+		}
+		nodes.push(...makeNode(match[1]));
+		lastIndex = match.index + match[0].length;
+	}
+	if (lastIndex < text.length) {
+		nodes.push({ type: 'text', content: text.slice(lastIndex) });
+	}
+	return nodes;
+}
+
 export function checklistPlugin(md: MarkdownIt, getOptions: () => CheckboxPluginOptions): void {
-	const pattern = /^\[([ xX~-])\](?=\s|$)/;
-
-	md.inline.ruler.before('emphasis', 'markdown-checkboxes', (state, silent) => {
+	md.core.ruler.after('inline', 'mjsk-markdown-checkboxes', (state) => {
 		const options = getOptions();
 		if (!options.enabled) {
 			return false;
 		}
 
-		if (state.src.charCodeAt(state.pos) !== 0x5b /* [ */) {
-			return false;
-		}
-
-		const match = pattern.exec(state.src.slice(state.pos));
-		if (!match) {
-			return false;
-		}
-
-		// Gate matching to keep default behavior unchanged:
-		// - Always allow at the start of list items
-		// - Only allow in tables when enableTableCheckboxes is true
-		const bol = state.src.lastIndexOf('\n', state.pos - 1) + 1;
-		const eolIndex = state.src.indexOf('\n', state.pos);
-		const eol = eolIndex === -1 ? state.src.length : eolIndex;
-		const prefix = state.src.slice(bol, state.pos);
-		const line = state.src.slice(bol, eol);
-
-		const isListItem = isLikelyListItemPrefix(prefix);
-		const isTable = options.enableTableCheckboxes && isLikelyTableRow(line);
-		if (!isListItem && !isTable) {
-			return false;
-		}
-
-		const rawState = match[1];
-		const normalizedState = rawState === 'X' ? 'x' : rawState;
-
-		if (!options.enableExtendedStates && (normalizedState === '~' || normalizedState === '-')) {
-			return false;
-		}
-
-		// When persistence is disabled, we only want to handle:
-		// - custom states in lists (since markdown-it-task-lists already handles [ ]/[x])
-		// - any states in tables (because task-lists does not handle tables)
-		if (!options.persistPreviewChanges) {
-			if (isListItem && (normalizedState === ' ' || normalizedState.toLowerCase() === 'x')) {
-				return false;
-			}
-		}
-
-		if (silent) {
-			return true;
-		}
-
-		const token = state.push('markdown_checkbox', '', 0);
-		token.meta = {
-			offset: state.pos,
-			state: normalizedState,
-		};
-
-		state.pos += match[0].length;
-		return true;
-	});
-
-	md.core.ruler.after('inline', 'markdown-checkboxes-list-classes', (state) => {
-		const options = getOptions();
-		if (!options.enabled) {
-			return false;
-		}
+		// Track whether we're inside a table while walking the token stream.
+		let tableDepth = 0;
+		// Occurrence counter per source line (used for persistence).
+		const perLineIndex = new Map<number, number>();
 
 		const tokens = state.tokens;
 		for (let i = 0; i < tokens.length; i++) {
 			const token = tokens[i];
-			if (token.type !== 'inline' || !token.children) {
+			if (token.type === 'table_open') {
+				tableDepth++;
+				continue;
+			}
+			if (token.type === 'table_close') {
+				tableDepth = Math.max(0, tableDepth - 1);
 				continue;
 			}
 
-			if (!token.children.some(child => child.type === 'markdown_checkbox')) {
+			const inTable = tableDepth > 0;
+			if (!token.children || token.type !== 'inline') {
 				continue;
 			}
 
-			// Add the same classes markdown-it-task-lists uses for list styling.
-			// Find nearest list_item_open and list_open before this inline token.
-			for (let j = i; j >= 0; j--) {
-				const t = tokens[j];
-				if (t.type === 'list_item_open') {
-					const existing = t.attrGet('class') ?? '';
-					if (!existing.split(/\s+/).includes('task-list-item')) {
-						t.attrSet('class', (existing ? existing + ' ' : '') + 'task-list-item');
+			const startLine = Array.isArray(token.map) ? token.map[0] : undefined;
+			const sourceLine = typeof startLine === 'number' ? startLine : -1;
+
+			const envPath = (state.env as any)?.path ?? (state.env as any)?.filePath ?? (state.env as any)?.sourceFile;
+			const uri = typeof envPath === 'string' ? envPath : '';
+
+			const makeArgsFor = () => {
+				if (!options.persistPreviewChanges || sourceLine < 0) {
+					return undefined;
+				}
+				const current = perLineIndex.get(sourceLine) ?? 0;
+				perLineIndex.set(sourceLine, current + 1);
+				// This will be parsed by the extension's UriHandler.
+				return encodeURIComponent(JSON.stringify({ uri, line: sourceLine, index: current }));
+			};
+
+			// 1) List item checkbox at start of list item text (GitHub style)
+			// We do this ourselves when persistence is enabled OR when extended states are enabled.
+			const isListTodo =
+				i >= 2 &&
+				tokens[i - 1]?.type === 'paragraph_open' &&
+				tokens[i - 2]?.type === 'list_item_open' &&
+				(token.content.startsWith('[ ]') || token.content.startsWith('[x]') || token.content.startsWith('[X]') || token.content.startsWith('[-]') || token.content.startsWith('[~]'));
+
+			if (isListTodo) {
+				const raw = token.content[1];
+				const stateChar = normalizeStateChar(raw);
+				const isExtended = stateChar === '~' || stateChar === '-';
+				if (isExtended && !options.enableExtendedStates) {
+					// Leave it as text when extended states are disabled.
+				} else {
+					// Preserve original behavior when persistence is off for standard [ ]/[x]
+					// by letting markdown-it-task-lists handle it.
+					if (options.persistPreviewChanges || isExtended) {
+						const args = makeArgsFor();
+						const html = makeCheckboxHtml(stateChar, options.persistPreviewChanges, args);
+						const checkboxToken = new state.Token('html_inline', '', 0);
+						checkboxToken.content = html;
+
+						// Insert checkbox token at start and remove the markdown marker.
+						token.children.unshift(checkboxToken);
+						// token.children[1] is the first original child after unshift.
+						if (token.children[1]?.type === 'text' && typeof token.children[1].content === 'string') {
+								token.children[1].content = token.children[1].content.slice(3);
+						}
+							token.content = token.content.slice(3);
+
+						// Add list classes to match GitHub markup.
+						const li = tokens[i - 2];
+						const liExisting = li.attrGet('class') ?? '';
+						if (!liExisting.split(/\s+/).includes('task-list-item')) {
+							li.attrSet('class', (liExisting ? liExisting + ' ' : '') + 'task-list-item');
+						}
+						// Mark the nearest list as contains-task-list
+						for (let j = i - 2; j >= 0; j--) {
+							const t = tokens[j];
+							if (t.type === 'bullet_list_open' || t.type === 'ordered_list_open') {
+								const existing = t.attrGet('class') ?? '';
+								if (!existing.split(/\s+/).includes('contains-task-list')) {
+									t.attrSet('class', (existing ? existing + ' ' : '') + 'contains-task-list');
+								}
+								break;
+							}
+						}
 					}
-					break;
 				}
-				if (t.type === 'bullet_list_open' || t.type === 'ordered_list_open') {
-					break;
-				}
+				continue;
 			}
 
-			for (let j = i; j >= 0; j--) {
-				const t = tokens[j];
-				if (t.type === 'bullet_list_open' || t.type === 'ordered_list_open') {
-					const existing = t.attrGet('class') ?? '';
-					if (!existing.split(/\s+/).includes('contains-task-list')) {
-						t.attrSet('class', (existing ? existing + ' ' : '') + 'contains-task-list');
+			// 2) Table (and other inline) checkbox replacement, controlled by enableTableCheckboxes
+			if (!inTable || !options.enableTableCheckboxes) {
+				continue;
+			}
+
+			const newChildren: any[] = [];
+			for (const child of token.children) {
+				if (child.type !== 'text' || typeof child.content !== 'string') {
+					newChildren.push(child);
+					continue;
+				}
+
+				const parts = replaceCheckboxesInText(child.content, (rawState) => {
+					const stateChar = normalizeStateChar(rawState);
+					const isExtended = stateChar === '~' || stateChar === '-';
+					if (isExtended && !options.enableExtendedStates) {
+						return [{ type: 'text', content: `[${rawState}]` }];
 					}
-					break;
+					const args = makeArgsFor();
+					const html = makeCheckboxHtml(stateChar, options.persistPreviewChanges, args);
+					return [{ type: 'html_inline', content: html }];
+				});
+
+				for (const part of parts) {
+					const t = new state.Token(part.type, '', 0);
+					t.content = part.content;
+					newChildren.push(t);
 				}
 			}
+			token.children = newChildren;
 		}
 
 		return false;
 	});
-
-	md.renderer.rules.markdown_checkbox = (tokens, idx, _options, env) => {
-		const options = getOptions();
-		const meta = (tokens[idx].meta ?? {}) as { offset?: number; state?: string };
-		const offset = typeof meta.offset === 'number' ? meta.offset : -1;
-		const stateChar = typeof meta.state === 'string' ? meta.state : ' ';
-		const { stateClass, ariaChecked } = stateToClasses(stateChar);
-
-		// Best-effort to identify the originating document for persistence.
-		const envPath = (env as any)?.path ?? (env as any)?.filePath ?? (env as any)?.sourceFile;
-		const uri = typeof envPath === 'string' ? envPath : '';
-
-		if (options.persistPreviewChanges) {
-			const args = encodeURIComponent(JSON.stringify({ uri, offset }));
-			return `<a class="task-list-item-checkbox ${stateClass}" href="command:mjsk-markdown-checkboxes.toggle?${args}" data-offset="${offset}" role="checkbox" aria-checked="${ariaChecked}" title="Toggle checkbox"></a>`;
-		}
-
-		// Non-persistent rendering:
-		// - Keep native inputs for [ ]/[x] to match the built-in preview.
-		// - Render custom states as spans with CSS icons.
-		if (stateChar === ' ' || stateChar.toLowerCase() === 'x') {
-			const checkedAttr = stateChar.toLowerCase() === 'x' ? ' checked="checked"' : '';
-			return `<input class="task-list-item-checkbox" type="checkbox" disabled="disabled"${checkedAttr}>`;
-		}
-
-		return `<span class="task-list-item-checkbox ${stateClass}" role="checkbox" aria-checked="${ariaChecked}" title="Checkbox"></span>`;
-	};
 }

@@ -4,6 +4,8 @@ import type MarkdownIt from 'markdown-it';
 
 import { checklistPlugin, type CheckboxPluginOptions } from './plugin';
 
+const EXTENSION_ID = 'xxmjskxx.mjsk-markdown-checkboxes';
+
 function getOptions(): CheckboxPluginOptions {
     const config = vscode.workspace.getConfiguration('mjsk-markdown-checkboxes');
     const legacyConfig = vscode.workspace.getConfiguration('markdown-checkboxes');
@@ -85,6 +87,173 @@ async function resolveTargetDocumentUri(rawUri: unknown): Promise<vscode.Uri | u
     }
 }
 
+type ToggleArgs = {
+    uri?: unknown;
+    offset?: unknown;
+    line?: unknown;
+    inlinePos?: unknown;
+    index?: unknown;
+};
+
+function parseToggleArgsFromUri(uri: vscode.Uri): ToggleArgs {
+    const q = new URLSearchParams(uri.query);
+    const raw = q.get('args');
+    if (!raw) {
+        return {};
+    }
+    try {
+        return JSON.parse(decodeURIComponent(raw)) as ToggleArgs;
+    } catch {
+        return {};
+    }
+}
+
+async function applyToggleFromArgs(args: ToggleArgs): Promise<void> {
+    const options = getOptions();
+    if (!options.persistPreviewChanges) {
+        return;
+    }
+
+    const uri = await resolveTargetDocumentUri(args?.uri);
+    const legacyOffset = typeof args?.offset === 'number' ? (args.offset as number) : undefined;
+    const lineNumber = typeof args?.line === 'number' ? (args.line as number) : undefined;
+    const inlinePos = typeof args?.inlinePos === 'number' ? (args.inlinePos as number) : undefined;
+    const occurrenceIndex = typeof args?.index === 'number' ? (args.index as number) : undefined;
+
+    if (!uri) {
+        return;
+    }
+
+    const document = await vscode.workspace.openTextDocument(uri);
+
+    // Preferred targeting: (line, index) where index is the Nth rendered checkbox on that line.
+    if (typeof lineNumber === 'number' && lineNumber >= 0 && typeof occurrenceIndex === 'number' && occurrenceIndex >= 0) {
+        if (lineNumber >= document.lineCount) {
+            return;
+        }
+
+        const line = document.lineAt(lineNumber);
+        const checkboxRegex = /\[([ xX~-])\]/g;
+
+        let match: RegExpExecArray | null;
+        let current = 0;
+        let target: { index: number; state: string } | undefined;
+
+        while ((match = checkboxRegex.exec(line.text))) {
+            const state = match[1];
+            const normalized = state.toLowerCase();
+            const isExtended = normalized === '~' || normalized === '-';
+
+            if (isExtended && !options.enableExtendedStates) {
+                continue;
+            }
+
+            if (current === occurrenceIndex) {
+                target = { index: match.index, state };
+                break;
+            }
+            current++;
+        }
+
+        if (!target) {
+            return;
+        }
+
+        const replaceStart = new vscode.Position(lineNumber, target.index + 1);
+        const replaceEnd = new vscode.Position(lineNumber, target.index + 2);
+        const next = computeNextState(target.state, options.enableExtendedStates);
+
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(uri, new vscode.Range(replaceStart, replaceEnd), next);
+        await vscode.workspace.applyEdit(edit);
+        return;
+    }
+
+    // New targeting: (line, inlinePos)
+    if (typeof lineNumber === 'number' && lineNumber >= 0 && typeof inlinePos === 'number' && inlinePos >= 0) {
+        if (lineNumber >= document.lineCount) {
+            return;
+        }
+        const line = document.lineAt(lineNumber);
+        const checkboxRegex = /\[([ xX~-])\]/g;
+
+        let match: RegExpExecArray | null;
+        let bestMatch: { index: number; state: string; distance: number } | undefined;
+
+        while ((match = checkboxRegex.exec(line.text))) {
+            const state = match[1];
+            const index = match.index;
+            const distance = Math.abs(index - inlinePos);
+            if (!bestMatch || distance < bestMatch.distance) {
+                bestMatch = { index, state, distance };
+            }
+        }
+
+        if (!bestMatch) {
+            return;
+        }
+
+        if (!options.enableExtendedStates && (bestMatch.state === '~' || bestMatch.state === '-')) {
+            return;
+        }
+
+        const replaceStart = new vscode.Position(lineNumber, bestMatch.index + 1);
+        const replaceEnd = new vscode.Position(lineNumber, bestMatch.index + 2);
+        const next = computeNextState(bestMatch.state, options.enableExtendedStates);
+
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(uri, new vscode.Range(replaceStart, replaceEnd), next);
+        await vscode.workspace.applyEdit(edit);
+        return;
+    }
+
+    // Legacy targeting: absolute offset in document (best-effort)
+    if (typeof legacyOffset !== 'number' || legacyOffset < 0) {
+        return;
+    }
+
+    const anchorPos = document.positionAt(legacyOffset);
+    const line = document.lineAt(anchorPos.line);
+    const lineStartOffset = document.offsetAt(line.range.start);
+
+    const checkboxRegex = /\[([ xX~-])\]/g;
+    let match: RegExpExecArray | null;
+    let bestMatch: { index: number; state: string } | undefined;
+
+    while ((match = checkboxRegex.exec(line.text))) {
+        const startIndex = match.index;
+        const endIndexExclusive = startIndex + match[0].length;
+        const absoluteStart = lineStartOffset + startIndex;
+        const absoluteEndExclusive = lineStartOffset + endIndexExclusive;
+
+        if (legacyOffset >= absoluteStart && legacyOffset < absoluteEndExclusive) {
+            bestMatch = { index: startIndex, state: match[1] };
+            break;
+        }
+
+        // Fallback: first checkbox after the clicked offset within the same line
+        if (!bestMatch && absoluteStart >= legacyOffset) {
+            bestMatch = { index: startIndex, state: match[1] };
+        }
+    }
+
+    if (!bestMatch) {
+        return;
+    }
+
+    if (!options.enableExtendedStates && (bestMatch.state === '~' || bestMatch.state === '-')) {
+        return;
+    }
+
+    const replaceStart = new vscode.Position(anchorPos.line, bestMatch.index + 1);
+    const replaceEnd = new vscode.Position(anchorPos.line, bestMatch.index + 2);
+    const next = computeNextState(bestMatch.state, options.enableExtendedStates);
+
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(uri, new vscode.Range(replaceStart, replaceEnd), next);
+    await vscode.workspace.applyEdit(edit);
+}
+
 function computeNextState(current: string, enableExtendedStates: boolean): string {
     let configuredCycle = readPersistCycle();
     if (!enableExtendedStates) {
@@ -118,64 +287,29 @@ function computeNextState(current: string, enableExtendedStates: boolean): strin
 }
 
 export function activate(context: vscode.ExtensionContext) {
+	const output = vscode.window.createOutputChannel('Mjsk Markdown Checkboxes');
+	output.appendLine('Activated.');
+	context.subscriptions.push(output);
+
     const toggleCommand = vscode.commands.registerCommand('mjsk-markdown-checkboxes.toggle', async (args: any) => {
-        const options = getOptions();
-        if (!options.persistPreviewChanges) {
-            return;
-        }
-
-        const uri = await resolveTargetDocumentUri(args?.uri);
-        const offset = typeof args?.offset === 'number' ? args.offset : undefined;
-        if (!uri || typeof offset !== 'number' || offset < 0) {
-            return;
-        }
-
-        const document = await vscode.workspace.openTextDocument(uri);
-
-        // Prefer offset-based updates (supports tables with multiple checkboxes per line).
-        const anchorPos = document.positionAt(offset);
-        const line = document.lineAt(anchorPos.line);
-        const lineStartOffset = document.offsetAt(line.range.start);
-
-        const checkboxRegex = /\[([ xX~-])\]/g;
-        let match: RegExpExecArray | null;
-        let bestMatch: { index: number; state: string } | undefined;
-
-        while ((match = checkboxRegex.exec(line.text))) {
-            const startIndex = match.index;
-            const endIndexExclusive = startIndex + match[0].length;
-            const absoluteStart = lineStartOffset + startIndex;
-            const absoluteEndExclusive = lineStartOffset + endIndexExclusive;
-
-            if (offset >= absoluteStart && offset < absoluteEndExclusive) {
-                bestMatch = { index: startIndex, state: match[1] };
-                break;
-            }
-
-            // Fallback: first checkbox after the clicked offset within the same line
-            if (!bestMatch && absoluteStart >= offset) {
-                bestMatch = { index: startIndex, state: match[1] };
-            }
-        }
-
-        if (!bestMatch) {
-            return;
-        }
-
-        if (!options.enableExtendedStates && (bestMatch.state === '~' || bestMatch.state === '-')) {
-            return;
-        }
-
-        const replaceStart = new vscode.Position(anchorPos.line, bestMatch.index + 1);
-        const replaceEnd = new vscode.Position(anchorPos.line, bestMatch.index + 2);
-        const next = computeNextState(bestMatch.state, options.enableExtendedStates);
-
-        const edit = new vscode.WorkspaceEdit();
-        edit.replace(uri, new vscode.Range(replaceStart, replaceEnd), next);
-        await vscode.workspace.applyEdit(edit);
+        await applyToggleFromArgs(args ?? {});
     });
 
     context.subscriptions.push(toggleCommand);
+
+    context.subscriptions.push(vscode.window.registerUriHandler({
+        async handleUri(uri: vscode.Uri) {
+            // Expect: vscode://<extensionId>/toggle?args=<encodedJson>
+            if (uri.authority !== EXTENSION_ID) {
+                return;
+            }
+            if (uri.path !== '/toggle') {
+                return;
+            }
+            const args = parseToggleArgsFromUri(uri);
+            await applyToggleFromArgs(args);
+        }
+    }));
 
     return {
         extendMarkdownIt(md: MarkdownIt) {

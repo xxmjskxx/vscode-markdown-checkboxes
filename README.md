@@ -28,7 +28,7 @@ These settings are under **Mjsk Markdown Checkboxes Options**:
 
 - `mjsk-markdown-checkboxes.persistPreviewChanges` (default: `false`)
 	- When enabled, clicking a checkbox in the preview updates the source markdown file.
-	- Note: This requires the VS Code setting `markdown.preview.allowCommandLinks` to be enabled, since the preview click uses a `command:` link.
+	- Note: VS Code may prompt to open the `vscode://` link the first time.
 
 - `mjsk-markdown-checkboxes.persistPreviewToggleCycle` (default: `[]`)
 	- Optional ordered list of states to cycle through on click when persistence is enabled.
@@ -41,7 +41,6 @@ Enable table checkboxes + preview-click persistence, and cycle through all state
 
 ```json
 {
-	"markdown.preview.allowCommandLinks": true,
 	"mjsk-markdown-checkboxes.enable": true,
 	"mjsk-markdown-checkboxes.enableTableCheckboxes": true,
 	"mjsk-markdown-checkboxes.enableExtendedStates": true,

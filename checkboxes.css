@@ -30,45 +30,21 @@ span.task-list-item-checkbox {
     color: inherit;
     cursor: pointer;
     display: inline-block;
-    width: 1.1em;
-    height: 1.1em;
+    width: 1.2em;
+    height: 1.2em;
     vertical-align: text-bottom;
     margin-right: 0.45em;
+    text-align: center;
+    line-height: 1.2em;
 }
 
-/* Hide any accidental text content; show icon via ::before */
-a.task-list-item-checkbox,
-span.task-list-item-checkbox {
-    font-size: 0;
-    line-height: 0;
+/* Persistent toggle wrapper around native inputs/spans */
+a.task-list-item-checkbox-link {
+    text-decoration: none;
+    color: inherit;
+    cursor: pointer;
 }
 
-a.task-list-item-checkbox::before,
-span.task-list-item-checkbox::before {
-    font-size: 1.1em;
-    line-height: 1.1em;
-}
-
-/* [ ] */
-a.task-list-item-checkbox.is-unchecked::before,
-span.task-list-item-checkbox.is-unchecked::before {
-    content: "☐";
-}
-
-/* [x] */
-a.task-list-item-checkbox.is-checked::before,
-span.task-list-item-checkbox.is-checked::before {
-    content: "☑";
-}
-
-/* [~] */
-a.task-list-item-checkbox.is-wip::before,
-span.task-list-item-checkbox.is-wip::before {
-    content: "⊡";
-}
-
-/* [-] */
-a.task-list-item-checkbox.is-cancelled::before,
-span.task-list-item-checkbox.is-cancelled::before {
-    content: "⊟";
+a.task-list-item-checkbox-link > input.task-list-item-checkbox {
+    pointer-events: none;
 }

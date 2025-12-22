@@ -30,6 +30,7 @@
     "onCommand:mjsk-markdown-checkboxes.toggle"
   ],
   "extensionKind": [
+    "ui",
     "workspace"
   ],
   "contributes": {
@@ -73,7 +74,7 @@
         },
         "mjsk-markdown-checkboxes.persistPreviewChanges": {
           "type": "boolean",
-          "markdownDescription": "When enabled, clicking a checkbox in the markdown preview updates the source file. Requires VS Code setting `markdown.preview.allowCommandLinks` to be enabled to allow preview command links.",
+          "markdownDescription": "When enabled, clicking a checkbox in the markdown preview updates the source file.",
           "default": false
         },
         "mjsk-markdown-checkboxes.persistPreviewToggleCycle": {
