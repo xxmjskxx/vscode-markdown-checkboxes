@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Markdown checkbox">
+  <!-- Transparent background by design -->
+  <defs>
+    <style>
+      .ink { stroke: #0f172a; stroke-width: 10; stroke-linecap: round; stroke-linejoin: round; fill: none; }
+      .accent { stroke: #14b8a6; stroke-width: 10; stroke-linecap: round; stroke-linejoin: round; fill: none; }
+    </style>
+  </defs>
+
+  <!-- Big, readable markdown motif: [ ☑ ] -->
+  <!-- Left bracket -->
+  <path class="ink" d="M 34 26 H 22 V 102 H 34"/>
+  <!-- Right bracket -->
+  <path class="ink" d="M 94 26 H 106 V 102 H 94"/>
+
+  <!-- Checkbox -->
+  <rect x="44" y="44" width="40" height="40" rx="10" class="ink"/>
+  <!-- Check -->
+  <path class="accent" d="M 52 66 L 60 74 L 76 56"/>
+</svg>

@@ -1,0 +1,18 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "module": "es2022",
+    "moduleResolution": "node",
+    "target": "es2022",
+    "lib": ["es2022", "dom"],
+    "allowSyntheticDefaultImports": true
+  },
+  "include": [
+    "./**/*",
+    "../src/plugin.ts"
+  ],
+  "exclude": [
+    "../node_modules",
+    "../.vscode-test"
+  ]
+}

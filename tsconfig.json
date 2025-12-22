@@ -4,7 +4,8 @@
         "moduleResolution": "node",
         "target": "es2022",
         "lib": [
-            "es2022"
+            "es2022",
+            "dom"
         ],
         "allowSyntheticDefaultImports": true
     },
@@ -12,7 +13,10 @@
         "node_modules",
         ".vscode-test"
     ],
-    "files": [
-        "./src/index.ts"
+    "include": [
+        "src/**/*.ts",
+        "src/**/*.d.ts",
+        "notebook/**/*.ts",
+        "notebook/**/*.d.ts"
     ]
 }
