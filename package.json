@@ -44,6 +44,9 @@
     "markdown.previewStyles": [
       "checkboxes.css"
     ],
+    "markdown.previewScripts": [
+      "preview.js"
+    ],
     "notebookRenderer": [
       {
         "id": "xxmjskxx.markdown-it-mjsk-markdown-checkboxes",

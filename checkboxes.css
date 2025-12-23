@@ -24,27 +24,97 @@
  * Keep selectors narrow so we don't override the built-in styling of
  * `input.task-list-item-checkbox` from markdown-it-task-lists.
  */
-a.task-list-item-checkbox,
-span.task-list-item-checkbox {
-    text-decoration: none;
-    color: inherit;
-    cursor: pointer;
-    display: inline-block;
-    width: 1.2em;
-    height: 1.2em;
-    vertical-align: text-bottom;
-    margin-right: 0.45em;
-    text-align: center;
-    line-height: 1.2em;
-}
-
 /* Persistent toggle wrapper around native inputs/spans */
 a.task-list-item-checkbox-link {
     text-decoration: none;
     color: inherit;
     cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    vertical-align: text-bottom;
 }
 
-a.task-list-item-checkbox-link > input.task-list-item-checkbox {
-    pointer-events: none;
+/* Keep spacing consistent regardless of whether it's an input or span */
+a.task-list-item-checkbox-link > input.task-list-item-checkbox,
+a.task-list-item-checkbox-link > span.task-list-item-checkbox {
+    margin: 0 0.45em 0 0;
+}
+
+/*
+ * Persistence mode renders ALL states as <span.task-list-item-checkbox ...>.
+ * Draw standard [ ]/[x] states here so we don't rely on native <input> state.
+ */
+span.task-list-item-checkbox.is-unchecked,
+span.task-list-item-checkbox.is-checked,
+span.task-list-item-checkbox.is-wip,
+span.task-list-item-checkbox.is-cancelled {
+    display: inline-block;
+    width: 13px;
+    height: 13px;
+    box-sizing: border-box;
+    border: 1px solid var(--vscode-checkbox-border, currentColor);
+    border-radius: 2px;
+    background: var(--vscode-checkbox-background, transparent);
+    vertical-align: text-bottom;
+    position: relative;
+}
+
+span.task-list-item-checkbox.is-checked {
+    background: var(--vscode-checkbox-background, transparent);
+    border-color: var(--vscode-checkbox-border, currentColor);
+}
+
+/* Checkmark (simple, GitHub-like) */
+span.task-list-item-checkbox.is-checked::after {
+    content: "";
+    position: absolute;
+    left: 3px;
+    top: 1px;
+    width: 4px;
+    height: 8px;
+    border-right: 2px solid #e36209;
+    border-bottom: 2px solid #e36209;
+    transform: rotate(45deg);
+}
+
+/* Extended states ([~], [-]) are rendered as spans and drawn with CSS */
+span.task-list-item-checkbox.is-wip,
+span.task-list-item-checkbox.is-cancelled {
+}
+
+/* Color accents for extended states (theme-based) */
+span.task-list-item-checkbox.is-wip {
+    border-color: var(--vscode-textLink-foreground, currentColor);
+}
+
+span.task-list-item-checkbox.is-cancelled {
+    border-color: var(--vscode-errorForeground, currentColor);
+}
+
+span.task-list-item-checkbox.is-cancelled {
+    opacity: 0.8;
+}
+
+span.task-list-item-checkbox.is-cancelled::after {
+    content: "";
+    position: absolute;
+    left: 2px;
+    right: 2px;
+    top: 50%;
+    height: 1px;
+    background: var(--vscode-errorForeground, var(--vscode-checkbox-foreground, currentColor));
+    transform: translateY(-0.5px);
+}
+
+span.task-list-item-checkbox.is-wip::after {
+    content: "";
+    position: absolute;
+    width: 5px;
+    height: 5px;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: var(--vscode-textLink-foreground, var(--vscode-checkbox-foreground, currentColor));
+    opacity: 0.9;
 }

@@ -16,6 +16,7 @@ function getOptions(): CheckboxPluginOptions {
         enableTableCheckboxes: config.get<boolean>('enableTableCheckboxes', legacyConfig.get<boolean>('enableTableCheckboxes', false)),
         enableExtendedStates: config.get<boolean>('enableExtendedStates', legacyConfig.get<boolean>('enableExtendedStates', false)),
         persistPreviewChanges: config.get<boolean>('persistPreviewChanges', legacyConfig.get<boolean>('persistPreviewChanges', false)),
+		persistPreviewToggleCycle: readPersistCycle(),
     };
 }
 
@@ -93,6 +94,7 @@ type ToggleArgs = {
     line?: unknown;
     inlinePos?: unknown;
     index?: unknown;
+	indexGlobal?: unknown;
 };
 
 function parseToggleArgsFromUri(uri: vscode.Uri): ToggleArgs {
@@ -108,23 +110,244 @@ function parseToggleArgsFromUri(uri: vscode.Uri): ToggleArgs {
     }
 }
 
+/**
+ * Count how many eligible checkboxes exist in a markdown document text,
+ * excluding those inside fenced code blocks or inline backticks.
+ */
+function countCheckboxesInDocument(text: string): number {
+    const lines = text.split(/\r?\n/);
+    let count = 0;
+    let inFence = false;
+    const fencePattern = /^```/;
+    const checkboxPattern = /\[([ xX~-])\](?=\s|$)/g;
+
+    for (const line of lines) {
+        if (fencePattern.test(line)) {
+            inFence = !inFence;
+            continue;
+        }
+        if (inFence) {
+            continue;
+        }
+        // Remove inline backtick spans
+        const cleaned = line.replace(/`[^`]*`/g, match => ' '.repeat(match.length));
+        let m: RegExpExecArray | null;
+        while ((m = checkboxPattern.exec(cleaned)) !== null) {
+            count++;
+        }
+    }
+    return count;
+}
+
+let _output: vscode.OutputChannel | undefined;
+function getOutput(): vscode.OutputChannel {
+    if (!_output) {
+        _output = vscode.window.createOutputChannel('Mjsk Markdown Checkboxes');
+    }
+    return _output;
+}
+
 async function applyToggleFromArgs(args: ToggleArgs): Promise<void> {
+    const output = getOutput();
     const options = getOptions();
+    output.appendLine(`[toggle] args=${JSON.stringify(args)}`);
+    output.appendLine(`[toggle] options=${JSON.stringify(options)}`);
     if (!options.persistPreviewChanges) {
+        output.appendLine('[toggle] persistPreviewChanges is disabled');
         return;
     }
 
-    const uri = await resolveTargetDocumentUri(args?.uri);
+    async function refreshMarkdownPreview(targetUri: vscode.Uri): Promise<void> {
+        // Try the most reliable refresh methods first
+        const commandsToTry: Array<{ id: string; args: any[] }> = [
+            // Primary: explicit refresh commands
+            { id: 'markdown.preview.refresh', args: [] },
+            // Fallback: reopen the preview (forces full re-render)
+            { id: 'markdown.showPreview', args: [targetUri] },
+        ];
+
+        for (const c of commandsToTry) {
+            try {
+                await vscode.commands.executeCommand(c.id, ...c.args);
+                output.appendLine(`[refresh] executed ${c.id}`);
+                return;
+            } catch (e) {
+                output.appendLine(`[refresh] ${c.id} failed: ${e}`);
+            }
+        }
+    }
+
+    let uri = await resolveTargetDocumentUri(args?.uri);
     const legacyOffset = typeof args?.offset === 'number' ? (args.offset as number) : undefined;
     const lineNumber = typeof args?.line === 'number' ? (args.line as number) : undefined;
     const inlinePos = typeof args?.inlinePos === 'number' ? (args.inlinePos as number) : undefined;
     const occurrenceIndex = typeof args?.index === 'number' ? (args.index as number) : undefined;
+    const globalIndex = typeof args?.indexGlobal === 'number' ? (args.indexGlobal as number) : undefined;
 
     if (!uri) {
+        // Try active text editor first
+        const active = vscode.window.activeTextEditor?.document;
+        if (active && (active.languageId === 'markdown' || active.fileName.endsWith('.md'))) {
+            uri = active.uri;
+            output.appendLine(`[toggle] fallback to activeTextEditor uri=${uri.toString(true)}`);
+        }
+    }
+
+    if (!uri) {
+        // Fallback: find any visible markdown editor
+        for (const editor of vscode.window.visibleTextEditors) {
+            const doc = editor.document;
+            if (doc.languageId === 'markdown' || doc.fileName.endsWith('.md')) {
+                uri = doc.uri;
+                output.appendLine(`[toggle] fallback to visible editor uri=${uri.toString(true)}`);
+                break;
+            }
+        }
+    }
+
+    if (!uri) {
+        // Fallback: search ALL open text documents (includes non-visible ones)
+        const markdownDocs = vscode.workspace.textDocuments.filter(
+            doc => doc.languageId === 'markdown' || doc.fileName.endsWith('.md')
+        );
+        output.appendLine(`[toggle] found ${markdownDocs.length} open markdown docs`);
+        if (markdownDocs.length === 1) {
+            uri = markdownDocs[0].uri;
+            output.appendLine(`[toggle] fallback to only open markdown doc uri=${uri.toString(true)}`);
+        } else if (markdownDocs.length > 1) {
+            // Multiple markdown docs open - find the one where a checkbox exists at the line hint
+            const lineHint = typeof args?.line === 'number' ? args.line : -1;
+            const globalIdx = typeof args?.indexGlobal === 'number' ? args.indexGlobal : -1;
+            const checkboxPattern = /\[([ xX~-])\]/;
+
+            for (const doc of markdownDocs) {
+                // First check: line hint must be valid for this doc
+                if (lineHint < 0 || lineHint >= doc.lineCount) {
+                    continue;
+                }
+                // Second check: line at lineHint should contain a checkbox pattern
+                const lineText = doc.lineAt(lineHint).text;
+                if (!checkboxPattern.test(lineText)) {
+                    output.appendLine(`[toggle] doc ${doc.fileName} line ${lineHint} has no checkbox`);
+                    continue;
+                }
+                // Third check: count checkboxes and verify globalIdx exists in this doc
+                if (globalIdx >= 0) {
+                    const docText = doc.getText();
+                    const count = countCheckboxesInDocument(docText);
+                    if (globalIdx >= count) {
+                        output.appendLine(`[toggle] doc ${doc.fileName} has only ${count} checkboxes, need #${globalIdx}`);
+                        continue;
+                    }
+                }
+                uri = doc.uri;
+                output.appendLine(`[toggle] matched doc with checkbox at line ${lineHint}: ${uri.toString(true)}`);
+                break;
+            }
+            // If still no match, just use the first one
+            if (!uri) {
+                uri = markdownDocs[0].uri;
+                output.appendLine(`[toggle] fallback to first markdown doc uri=${uri.toString(true)}`);
+            }
+        }
+    }
+
+    if (!uri) {
+        output.appendLine('[toggle] no target uri - no markdown document found');
         return;
     }
 
     const document = await vscode.workspace.openTextDocument(uri);
+    output.appendLine(`[toggle] opened=${document.uri.toString(true)}`);
+
+    function isTableSeparatorLine(text: string): boolean {
+        return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(text);
+    }
+
+    function isTableLine(text: string): boolean {
+        const pipeCount = (text.match(/\|/g) ?? []).length;
+        if (pipeCount < 2) {
+            return false;
+        }
+        if (isTableSeparatorLine(text)) {
+            return false;
+        }
+        return true;
+    }
+
+    function isListLine(text: string): boolean {
+        return /^\s*(?:[-+*]|\d+[.)])\s+/.test(text);
+    }
+
+    function findNthEligibleCheckbox(n: number): { line: number; matchIndex: number; state: string } | undefined {
+        let count = 0;
+        let inCodeFence = false;
+        
+        for (let line = 0; line < document.lineCount; line++) {
+            const text = document.lineAt(line).text;
+            
+            // Track code fence state - skip content inside ``` blocks
+            if (/^\s*```/.test(text)) {
+                inCodeFence = !inCodeFence;
+                continue;
+            }
+            if (inCodeFence) {
+                continue;
+            }
+
+            const eligibleList = isListLine(text);
+            const eligibleTable = options.enableTableCheckboxes && isTableLine(text);
+            if (!eligibleList && !eligibleTable) {
+                continue;
+            }
+
+            // Remove inline code (backtick content) before searching for checkboxes
+            // This prevents matching [ ] inside `code` spans
+            const textWithoutInlineCode = text.replace(/`[^`]*`/g, match => ' '.repeat(match.length));
+
+            const checkboxRegex = /\[([ xX~-])\]/g;
+            let match: RegExpExecArray | null;
+            while ((match = checkboxRegex.exec(textWithoutInlineCode))) {
+                const state = match[1];
+                const normalized = state.toLowerCase();
+                const isExtended = normalized === '~' || normalized === '-';
+                if (isExtended && !options.enableExtendedStates) {
+                    continue;
+                }
+                if (count === n) {
+                    output.appendLine(`[toggle] found checkbox #${n} at line ${line}: "${text.substring(0, 50)}..."`);
+                    return { line, matchIndex: match.index, state };
+                }
+                count++;
+            }
+        }
+        output.appendLine(`[toggle] searched ${count} checkboxes, did not find #${n}`);
+        return undefined;
+    }
+
+    if (typeof globalIndex === 'number' && globalIndex >= 0) {
+        const target = findNthEligibleCheckbox(globalIndex);
+        if (!target) {
+            output.appendLine(`[toggle] indexGlobal=${globalIndex} not found`);
+            return;
+        }
+
+        const replaceStart = new vscode.Position(target.line, target.matchIndex + 1);
+        const replaceEnd = new vscode.Position(target.line, target.matchIndex + 2);
+        const next = computeNextState(target.state, options.enableExtendedStates);
+
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(uri, new vscode.Range(replaceStart, replaceEnd), next);
+        await vscode.workspace.applyEdit(edit);
+        try {
+            await document.save();
+        } catch {
+            // ignore
+        }
+        output.appendLine(`[toggle] toggled indexGlobal=${globalIndex} at line=${target.line}`);
+        await refreshMarkdownPreview(uri);
+        return;
+    }
 
     // Preferred targeting: (line, index) where index is the Nth rendered checkbox on that line.
     if (typeof lineNumber === 'number' && lineNumber >= 0 && typeof occurrenceIndex === 'number' && occurrenceIndex >= 0) {
@@ -166,6 +389,12 @@ async function applyToggleFromArgs(args: ToggleArgs): Promise<void> {
         const edit = new vscode.WorkspaceEdit();
         edit.replace(uri, new vscode.Range(replaceStart, replaceEnd), next);
         await vscode.workspace.applyEdit(edit);
+        try {
+            await document.save();
+        } catch {
+            // ignore
+        }
+        await refreshMarkdownPreview(uri);
         return;
     }
 
@@ -252,6 +481,12 @@ async function applyToggleFromArgs(args: ToggleArgs): Promise<void> {
     const edit = new vscode.WorkspaceEdit();
     edit.replace(uri, new vscode.Range(replaceStart, replaceEnd), next);
     await vscode.workspace.applyEdit(edit);
+    try {
+        await document.save();
+    } catch {
+        // ignore
+    }
+    await refreshMarkdownPreview(uri);
 }
 
 function computeNextState(current: string, enableExtendedStates: boolean): string {
@@ -287,7 +522,7 @@ function computeNextState(current: string, enableExtendedStates: boolean): strin
 }
 
 export function activate(context: vscode.ExtensionContext) {
-	const output = vscode.window.createOutputChannel('Mjsk Markdown Checkboxes');
+	const output = getOutput();
 	output.appendLine('Activated.');
 	context.subscriptions.push(output);
 
@@ -300,12 +535,15 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(vscode.window.registerUriHandler({
         async handleUri(uri: vscode.Uri) {
             // Expect: vscode://<extensionId>/toggle?args=<encodedJson>
-            if (uri.authority !== EXTENSION_ID) {
-                return;
-            }
-            if (uri.path !== '/toggle') {
-                return;
-            }
+			output.appendLine(`[uri] ${uri.toString(true)}`);
+			if (uri.authority !== EXTENSION_ID) {
+				output.appendLine(`[uri] ignored authority=${uri.authority}`);
+				return;
+			}
+			if (uri.path !== '/toggle') {
+				output.appendLine(`[uri] ignored path=${uri.path}`);
+				return;
+			}
             const args = parseToggleArgsFromUri(uri);
             await applyToggleFromArgs(args);
         }
@@ -315,8 +553,11 @@ export function activate(context: vscode.ExtensionContext) {
         extendMarkdownIt(md: MarkdownIt) {
             const options = getOptions();
 
-            // Default behavior stays on markdown-it-task-lists.
-            if (!options.persistPreviewChanges) {
+            // Only use markdown-it-task-lists when:
+            // 1. Persistence is OFF (so we don't need click handling)
+            // 2. Extended states are OFF (so we don't need [~] / [-] support)
+            // Otherwise, our custom plugin handles everything.
+            if (!options.persistPreviewChanges && !options.enableExtendedStates) {
                 md.use(() => md.use(taskList, {
                     enabled: options.enabled,
                     label: options.label,
