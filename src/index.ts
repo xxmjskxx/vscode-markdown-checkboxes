@@ -16,7 +16,6 @@ function getOptions(): CheckboxPluginOptions {
         enableTableCheckboxes: config.get<boolean>('enableTableCheckboxes', legacyConfig.get<boolean>('enableTableCheckboxes', false)),
         enableExtendedStates: config.get<boolean>('enableExtendedStates', legacyConfig.get<boolean>('enableExtendedStates', false)),
         persistPreviewChanges: config.get<boolean>('persistPreviewChanges', legacyConfig.get<boolean>('persistPreviewChanges', false)),
-		persistPreviewToggleCycle: readPersistCycle(),
     };
 }
 
@@ -219,7 +218,7 @@ async function applyToggleFromArgs(args: ToggleArgs): Promise<void> {
             const lineHint = typeof args?.line === 'number' ? args.line : -1;
             const globalIdx = typeof args?.indexGlobal === 'number' ? args.indexGlobal : -1;
             const checkboxPattern = /\[([ xX~-])\]/;
-
+            
             for (const doc of markdownDocs) {
                 // First check: line hint must be valid for this doc
                 if (lineHint < 0 || lineHint >= doc.lineCount) {
