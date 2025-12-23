@@ -16,6 +16,7 @@ function getOptions(): CheckboxPluginOptions {
         enableTableCheckboxes: config.get<boolean>('enableTableCheckboxes', legacyConfig.get<boolean>('enableTableCheckboxes', false)),
         enableExtendedStates: config.get<boolean>('enableExtendedStates', legacyConfig.get<boolean>('enableExtendedStates', false)),
         persistPreviewChanges: config.get<boolean>('persistPreviewChanges', legacyConfig.get<boolean>('persistPreviewChanges', false)),
+		persistPreviewToggleCycle: readPersistCycle(),
     };
 }
 
